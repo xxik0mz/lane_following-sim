@@ -1,0 +1,3 @@
+numpy
+matplotlib
+control>=0.10
