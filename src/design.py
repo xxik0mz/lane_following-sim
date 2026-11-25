@@ -47,3 +47,36 @@ def closed_loop_poles(v, L, Kp, Ki, Kd):
     C = ct.tf([Kd, Kp, Ki], [1, 0]) if Ki else ct.tf([Kd, Kp], [1])
     T = ct.feedback(C * G, 1)
     return ct.poles(T)
+
+
+def lateral_error_ss(car, vx):
+    """동역학 모델을 '차선 오차' 상태공간으로 바꾼다 (Rajamani, Vehicle Dynamics and Control 2장).
+
+    상태 x = [e_y, e_y', e_psi, e_psi'],  입력 u = delta,  외란 d = 경로 요레이트(vx*kappa)
+        x' = A x + B u + E d
+    여기서 Cf, Cr은 '축 하나'의 코너링 강성(타이어 2개 합)이다.
+    """
+    m, Iz, lf, lr, Cf, Cr = car.m, car.Iz, car.lf, car.lr, car.Cf, car.Cr
+    A = np.array([
+        [0, 1, 0, 0],
+        [0, -(Cf + Cr) / (m * vx), (Cf + Cr) / m, (-Cf * lf + Cr * lr) / (m * vx)],
+        [0, 0, 0, 1],
+        [0, -(Cf * lf - Cr * lr) / (Iz * vx), (Cf * lf - Cr * lr) / Iz, -(Cf * lf**2 + Cr * lr**2) / (Iz * vx)],
+    ])
+    B = np.array([[0], [Cf / m], [0], [Cf * lf / Iz]])
+    E = np.array([[0], [-(Cf * lf - Cr * lr) / (m * vx) - vx], [0], [-(Cf * lf**2 + Cr * lr**2) / (Iz * vx)]])
+    return A, B, E
+
+
+def understeer_gradient(car):
+    """언더스티어 계수 K_us [rad/(m/s^2)]: 정상 선회에 필요한 조향각
+    delta_ss = L/R + K_us * a_y  (K_us > 0 이면 언더스티어)."""
+    return car.m * (car.lr / car.Cf - car.lf / car.Cr) / car.L
+
+
+def pid_closed_loop_poles_dynamic(car, vx, Kp, Ki, Kd):
+    """PID(e_y 피드백)를 동역학 오차 모델에 붙였을 때의 폐루프 극점."""
+    A, B, _ = lateral_error_ss(car, vx)
+    G = ct.ss(A, B, np.array([[1, 0, 0, 0]]), 0)           # delta -> e_y
+    C = ct.tf([Kd, Kp, Ki], [1, 0]) if Ki else ct.tf([Kd, Kp], [1])
+    return ct.poles(ct.feedback(C * G, 1))
